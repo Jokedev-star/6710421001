@@ -109,7 +109,7 @@ fig.add_trace(go.Candlestick(
     name="SET50",
 ))
 fig.update_layout(height=500, xaxis_rangeslider_visible=False)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 st.markdown("### SET50 Constituents Overview")
 if not stocks_summary.empty:
@@ -126,7 +126,7 @@ if not stocks_summary.empty:
     stocks_summary_display["MarketCap"] = stocks_summary_display["MarketCap"].apply(
         lambda x: f"{x/1e9:,.2f}B" if pd.notna(x) else "N/A"
     )
-    st.dataframe(stocks_summary_display, use_container_width=True, hide_index=True)
+    st.dataframe(stocks_summary_display, width='stretch', hide_index=True)
 
     valid = stocks_summary.dropna(subset=["Change%"])
     if not valid.empty:
@@ -142,7 +142,7 @@ if not stocks_summary.empty:
                 text_auto=".2f",
             )
             fig_gain.update_layout(height=300, showlegend=False, yaxis={"categoryorder": "total ascending"})
-            st.plotly_chart(fig_gain, use_container_width=True)
+            st.plotly_chart(fig_gain, width='stretch')
 
         with col_right:
             st.markdown("#### Top Losers")
@@ -152,13 +152,13 @@ if not stocks_summary.empty:
                 text_auto=".2f",
             )
             fig_loss.update_layout(height=300, showlegend=False, yaxis={"categoryorder": "total ascending"})
-            st.plotly_chart(fig_loss, use_container_width=True)
+            st.plotly_chart(fig_loss, width='stretch')
 
     if not stocks_summary.dropna(subset=["MarketCap"]).empty:
         st.markdown("#### Market Cap Distribution")
         marketcap_data = stocks_summary.dropna(subset=["MarketCap"]).nlargest(15, "MarketCap")
         fig_pie = px.pie(marketcap_data, values="MarketCap", names="Name", hole=0.4)
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width='stretch')
 else:
     st.warning("Could not load individual stock data. The Yahoo Finance API may have rate-limited requests. Please try again later.")
 
