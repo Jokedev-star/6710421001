@@ -3,9 +3,8 @@ import yfinance as yf
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import json, os, time, re
+import json, os, re, random
 from datetime import datetime, timedelta
-from pyvis.network import Network
 
 st.set_page_config(page_title="SET50 Dashboard", layout="wide")
 st.title("SET50 Thailand Dashboard")
@@ -80,8 +79,7 @@ def load_all_stocks_summary(tickers):
             t = yf.Ticker(sym)
             info = t.info
             df_info.append({
-                "Name": name,
-                "Symbol": sym,
+                "Name": name, "Symbol": sym,
                 "Price": info.get("currentPrice") or info.get("regularMarketPrice"),
                 "Change%": info.get("regularMarketChangePercent"),
                 "Volume": info.get("regularMarketVolume"),
@@ -104,180 +102,43 @@ def classify_holder_type(name):
     if not name:
         return "unknown"
     name_upper = name.upper()
-
-    government_patterns = [
-        "กระทรวง", "กองทุนรวม วายุภักษ์", "สำนักงาน", "กองทุนบำเหน็จ",
-        "MINISTRY", "GOVERNMENT", "TREASURY", "FIDF", "Bank of Thailand",
-        "กระทรวงการคลัง", "ธนาคารแห่งประเทศไทย",
-    ]
-    for pat in government_patterns:
-        if pat.upper() in name_upper or pat in name:
+    gov = ["กระทรวง", "กองทุนรวม วายุภักษ์", "สำนักงาน", "กองทุนบำเหน็จ",
+           "MINISTRY", "GOVERNMENT", "TREASURY", "FIDF", "Bank of Thailand",
+           "กระทรวงการคลัง", "ธนาคารแห่งประเทศไทย"]
+    for p in gov:
+        if p.upper() in name_upper or p in name:
             return "government"
-
-    if "ไทยเอ็นวีดีอาร์" in name or "THAI NVDR" in name_upper or name_upper == "THAI NVDR COMPANY LIMITED":
+    if "ไทยเอ็นวีดีอาร์" in name or "THAI NVDR" in name_upper:
         return "nvdr"
-
-    fund_patterns = [
-        "กองทุน", " FUND", "FUND ", "VAYUPAK", "กองทุนรวม",
-    ]
-    for pat in fund_patterns:
-        if pat.upper() in name_upper or pat in name:
+    fund = ["กองทุน", " FUND", "FUND ", "VAYUPAK", "กองทุนรวม"]
+    for p in fund:
+        if p.upper() in name_upper or p in name:
             return "fund"
-
-    bank_patterns = [
-        "ธนาคาร", "BANK", "KBANK", "SCB", "BBL", "KTB", "TISCO", "TCAP", "KKP",
-        "UBS", "BNP PARIBAS", "CITI", "CITIBANK", "HSBC", "STATE STREET BANK",
-        "BANK OF NEW YORK", "BANK OF SINGAPORE", "MORGAN STANLEY",
-    ]
-    for pat in bank_patterns:
-        if pat in name_upper:
+    bank = ["ธนาคาร", "BANK", "UBS", "BNP PARIBAS", "CITI", "CITIBANK",
+            "HSBC", "STATE STREET BANK", "BANK OF NEW YORK", "MORGAN STANLEY"]
+    for p in bank:
+        if p in name_upper:
             return "institution"
-
-    insurance_patterns = [
-        "ประกัน", "INSURANCE", "TLI", "ไทยประกัน",
-    ]
-    for pat in insurance_patterns:
-        if pat in name_upper or pat in name:
+    ins = ["ประกัน", "INSURANCE"]
+    for p in ins:
+        if p in name_upper or p in name:
             return "institution"
-
-    coop_patterns = [
-        "สหกรณ์", "COOPERATIVE", "ชุมนุมสหกรณ์",
-    ]
-    for pat in coop_patterns:
-        if pat in name_upper or pat in name:
+    coop = ["สหกรณ์", "COOPERATIVE", "ชุมนุมสหกรณ์"]
+    for p in coop:
+        if p in name_upper or p in name:
             return "institution"
-
-    company_patterns = [
-        "บริษัท", " จำกัด", "CORPORATION", "INC.", "PLC", "LIMITED", "LTD",
-        "HOLDINGS", "HOLDING", "PTE.", "PCL", "PUBLIC COMPANY",
-    ]
-    for pat in company_patterns:
-        if pat in name_upper or pat in name:
+    comp = ["บริษัท", " จำกัด", "CORPORATION", "INC.", "PLC", "LIMITED",
+            "LTD", "HOLDINGS", "HOLDING", "PTE.", "PCL", "PUBLIC COMPANY"]
+    for p in comp:
+        if p in name_upper or p in name:
             return "company"
-
-    nominee_patterns = [
-        "NOMINEE", "NOMINEES",
-    ]
-    for pat in nominee_patterns:
-        if pat in name_upper:
+    nom = ["NOMINEE", "NOMINEES"]
+    for p in nom:
+        if p in name_upper:
             return "institution"
-
     if name_upper == name and any(c.isalpha() for c in name):
         return "institution"
-
     return "individual"
-
-def build_shareholder_graph(symbol, sh_data_rows, top_n=10, min_pct=0.0):
-    net = Network(height="550px", width="100%", directed=True, bgcolor="#ffffff", font_color="#333333")
-
-    net.barnes_hut(gravity=-3000, central_gravity=0.3, spring_length=200, spring_strength=0.01, damping=0.09)
-
-    company_name = SET50_NAMES.get(symbol, symbol)
-    net.add_node(
-        f"COMPANY_{symbol}",
-        label=f"{symbol}\n{company_name[:30]}",
-        title=f"<b>{symbol}</b><br>{company_name}",
-        size=40,
-        color="#1a73e8",
-        font={"size": 16, "face": "Arial", "color": "#ffffff"},
-        shape="box",
-        borderWidth=2,
-        borderColor="#0d47a1",
-    )
-
-    filtered = [r for r in sh_data_rows if r["Symbol"] == symbol]
-    filtered = [r for r in filtered if float(r.get("Ownership %", 0) or 0) >= min_pct]
-    filtered = sorted(filtered, key=lambda r: float(r.get("Ownership %", 0) or 0), reverse=True)[:top_n]
-
-    type_colors = {
-        "government": "#e74c3c",
-        "nvdr": "#9b59b6",
-        "fund": "#2ecc71",
-        "institution": "#f39c12",
-        "company": "#1abc9c",
-        "individual": "#95a5a6",
-        "unknown": "#7f8c8d",
-    }
-
-    for row in filtered:
-        holder_name = row.get("Shareholder Name", "Unknown")
-        pct = float(row.get("Ownership %", 0) or 0)
-        shares = row.get("Shares Held", 0)
-        htype = classify_holder_type(holder_name)
-        color = type_colors.get(htype, "#7f8c8d")
-        hsize = max(10, min(25, pct * 1.5))
-
-        safe_name = re.sub(r'[^\w\s]', '', holder_name)[:40]
-        node_id = f"HOLDER_{hash(holder_name) % 10**8}"
-
-        title_text = (
-            f"<b>{holder_name}</b><br>"
-            f"Type: {htype}<br>"
-            f"Shares: {shares:,.0f}<br>"
-            f"Ownership: {pct:.2f}%<br>"
-            f"As of: {row.get('As of Date', 'N/A')}"
-        )
-
-        net.add_node(
-            node_id,
-            label=safe_name[:25],
-            title=title_text,
-            size=hsize,
-            color=color,
-            font={"size": 11, "face": "Arial"},
-            shape="ellipse",
-            borderWidth=1,
-        )
-
-        edge_width = max(1, min(8, pct / 2))
-        net.add_edge(
-            node_id,
-            f"COMPANY_{symbol}",
-            value=pct,
-            title=f"Ownership: {pct:.2f}%<br>Shares: {shares:,.0f}<br>As of: {row.get('As of Date', 'N/A')}<br>Source: {row.get('Source URL', 'N/A')}",
-            width=edge_width,
-            color={"color": "#2c3e50", "opacity": 0.7},
-            arrowStrikethrough=False,
-            smooth={"type": "curvedCW", "roundness": 0.1},
-        )
-
-    net.set_options("""
-    {
-      "interaction": {
-        "hover": true,
-        "tooltipDelay": 100,
-        "navigationButtons": true,
-        "keyboard": true,
-        "zoomView": true,
-        "dragView": true
-      },
-      "physics": {
-        "barnesHut": {
-          "gravitationalConstant": -3000,
-          "centralGravity": 0.3,
-          "springLength": 200,
-          "springConstant": 0.01,
-          "damping": 0.09
-        },
-        "stabilization": {
-          "enabled": true,
-          "iterations": 100,
-          "updateInterval": 25
-        }
-      },
-      "edges": {
-        "arrows": {
-          "to": {
-            "enabled": true,
-            "type": "arrow",
-            "scaleFactor": 1.2
-          }
-        }
-      }
-    }
-    """)
-
-    return net
 
 def get_shareholders_for_symbol(symbol, sh_data):
     entry = sh_data.get("data", {}).get(symbol, {})
@@ -290,8 +151,7 @@ def get_shareholders_for_symbol(symbol, sh_data):
     rows = []
     for holder in entry.get("majorShareholders", [])[:10]:
         rows.append({
-            "Symbol": symbol,
-            "Company": company_name,
+            "Symbol": symbol, "Company": company_name,
             "Rank": holder.get("sequence"),
             "Shareholder Name": holder.get("name"),
             "Shares Held": holder.get("numberOfShare"),
@@ -301,6 +161,222 @@ def get_shareholders_for_symbol(symbol, sh_data):
             "Source URL": source_url,
         })
     return rows
+
+def make_shareholder_graph_html(nodes, edges):
+    nodes_json = json.dumps(nodes, ensure_ascii=False)
+    edges_json = json.dumps(edges, ensure_ascii=False)
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/vis-network.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/dist/dist/vis-network.min.css"/>
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ background:#0f1923; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; overflow:hidden; }}
+#mynetwork {{ width:100%; height:100%; }}
+#tooltip {{
+  position:absolute; display:none; background:rgba(15,25,35,0.95); color:#e0e0e0;
+  padding:10px 14px; border-radius:8px; font-size:13px; line-height:1.5;
+  border:1px solid rgba(255,255,255,0.12); box-shadow:0 4px 20px rgba(0,0,0,0.5);
+  pointer-events:none; z-index:999; max-width:320px;
+}}
+#tooltip b {{ color:#fff; }}
+</style>
+</head>
+<body>
+<div id="mynetwork"></div>
+<div id="tooltip"></div>
+<script>
+var nodes = new vis.DataSet({nodes_json});
+var edges = new vis.DataSet({edges_json});
+var container = document.getElementById('mynetwork');
+var options = {{
+  nodes: {{
+    font: {{ color: '#e0e0e0', face: 'Arial', size: 12 }},
+    borderWidth: 2,
+    shadow: {{ enabled: true, size: 4, x: 0, y: 2, color: 'rgba(0,0,0,0.3)' }}
+  }},
+  edges: {{
+    font: {{ color: '#8899aa', size: 10, strokeWidth: 0, align: 'middle' }},
+    arrows: {{ to: {{ enabled: true, type: 'arrow', scaleFactor: 0.8 }} }},
+    smooth: {{ type: 'curvedCW', roundness: 0.15 }},
+    color: {{ color: '#4a5a6a', highlight: '#66ccff', hover: '#66ccff', opacity: 0.6 }},
+    hoverWidth: 2,
+    selectionWidth: 2,
+  }},
+  physics: {{
+    solver: 'barnesHut',
+    barnesHut: {{ gravitationalConstant: -3000, centralGravity: 0.3, springLength: 180, springConstant: 0.02, damping: 0.08 }},
+    stabilization: {{ iterations: 150, updateInterval: 20 }}
+  }},
+  interaction: {{
+    hover: true, tooltipDelay: 0, navigationButtons: true, keyboard: true,
+    zoomView: true, dragView: true, multiselect: false
+  }},
+  layout: {{ improvedLayout: true }}
+}};
+var network = new vis.Network(container, {{ nodes, edges }}, options);
+
+network.on('hoverNode', function(p) {{
+  var node = nodes.get(p.node);
+  document.getElementById('tooltip').innerHTML = node.title || node.label;
+  document.getElementById('tooltip').style.display = 'block';
+}});
+network.on('hoverEdge', function(p) {{
+  var edge = edges.get(p.edge);
+  document.getElementById('tooltip').innerHTML = edge.title || '';
+  document.getElementById('tooltip').style.display = 'block';
+}});
+network.on('blurNode', function() {{ document.getElementById('tooltip').style.display = 'none'; }});
+network.on('blurEdge', function() {{ document.getElementById('tooltip').style.display = 'none'; }});
+
+network.on('click', function(p) {{
+  if (p.nodes.length > 0) {{
+    var node = nodes.get(p.nodes[0]);
+    sessionStorage.setItem('selectedNode', JSON.stringify({{ id: node.id, type: node.group === 'company' ? 'company' : 'holder', label: node.label }}));
+    document.getElementById('tooltip').innerHTML = '<b>Selected:</b> ' + (node.title || node.label) + '<br><small>View details below</small>';
+    document.getElementById('tooltip').style.display = 'block';
+  }} else if (p.edges.length > 0) {{
+    var edge = edges.get(p.edges[0]);
+    sessionStorage.setItem('selectedNode', JSON.stringify({{ id: edge.id, type: 'edge', label: edge.title || '' }}));
+  }}
+}});
+
+document.addEventListener('mousemove', function(e) {{
+  var t = document.getElementById('tooltip');
+  if (t.style.display === 'block') {{ t.style.left = (e.clientX + 15) + 'px'; t.style.top = (e.clientY + 15) + 'px'; }}
+}});
+</script>
+</body>
+</html>"""
+
+def build_graph_data(symbol, all_shareholder_rows, top_n=10, min_pct=0.0, holder_types=None, layout="force"):
+    is_all = symbol == "ALL"
+
+    type_colors = {
+        "government": "#e74c3c", "nvdr": "#9b59b6", "fund": "#27ae60",
+        "institution": "#f39c12", "company": "#1abc9c", "individual": "#e91e63",
+        "unknown": "#7f8c8d",
+    }
+
+    nodes = []
+    edges = []
+    seen_holders = {}
+    added_companies = set()
+
+    if is_all:
+        filtered = []
+        for r in all_shareholder_rows:
+            pct = float(r.get("Ownership %", 0) or 0)
+            if pct >= min_pct:
+                htype = classify_holder_type(r["Shareholder Name"])
+                if holder_types and holder_types != "All" and htype != holder_types:
+                    continue
+                filtered.append(r)
+
+        companies_used = set(r["Symbol"] for r in filtered)
+        for sym in sorted(companies_used)[:50]:
+            company_rows = [r for r in filtered if r["Symbol"] == sym]
+            company_rows = sorted(company_rows, key=lambda x: float(x.get("Ownership %", 0) or 0), reverse=True)[:max(3, top_n // 4)]
+            name = SET50_NAMES.get(sym, sym)
+
+            nodes.append({
+                "id": f"COMPANY_{sym}",
+                "label": sym,
+                "title": f"<b>{sym}</b><br>{name}<br>Shareholders: {len(company_rows)}",
+                "group": "company",
+                "color": {"background": "#1a73e8", "border": "#4fc3f7"},
+                "size": 35, "shape": "box", "font": {"size": 14, "color": "#ffffff", "face": "Arial"},
+                "borderWidth": 2,
+            })
+            added_companies.add(sym)
+
+            for row in company_rows:
+                hname = row["Shareholder Name"]
+                pct = float(row.get("Ownership %", 0) or 0)
+                shares = row.get("Shares Held", 0)
+                htype = classify_holder_type(hname)
+                color = type_colors.get(htype, "#7f8c8d")
+
+                hid = f"HOLDER_{hash(hname) % 10**9}"
+                if hid not in seen_holders:
+                    seen_holders[hid] = hname
+                    nodes.append({
+                        "id": hid,
+                        "label": hname[:20],
+                        "title": f"<b>{hname}</b><br>Type: {htype}",
+                        "group": htype,
+                        "color": {"background": color, "border": "#ffffff"},
+                        "size": 15, "shape": "dot",
+                        "font": {"size": 9, "color": "#aabbcc"},
+                        "borderWidth": 1,
+                    })
+
+                ew = min(6, max(0.5, pct / 5))
+                edges.append({
+                    "id": f"E_{sym}_{hid}",
+                    "from": hid, "to": f"COMPANY_{sym}",
+                    "value": pct,
+                    "width": ew,
+                    "label": f"{pct:.1f}%",
+                    "title": f"<b>{hname}</b> owns {pct:.2f}% of {sym}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>{hname}</b> owns {pct:.2f}% of {sym}<br>Shares: {shares}",
+                    "color": {"color": "#4a5a6a", "opacity": max(0.2, min(0.8, pct / 25))},
+                })
+
+    else:
+        company_rows = [r for r in all_shareholder_rows if r["Symbol"] == symbol]
+        company_rows = [r for r in company_rows if float(r.get("Ownership %", 0) or 0) >= min_pct]
+        company_rows = sorted(company_rows, key=lambda x: float(x.get("Ownership %", 0) or 0), reverse=True)[:top_n]
+
+        if holder_types and holder_types != "All":
+            company_rows = [r for r in company_rows if classify_holder_type(r["Shareholder Name"]) == holder_types]
+
+        name = SET50_NAMES.get(symbol, symbol)
+        nodes.append({
+            "id": f"COMPANY_{symbol}",
+            "label": f"{symbol}\n{name[:25]}",
+            "title": f"<b>{symbol}</b><br>{name}<br>Major shareholders: {len(company_rows)}",
+            "group": "company",
+            "color": {"background": "#1a73e8", "border": "#4fc3f7"},
+            "size": 50, "shape": "box",
+            "font": {"size": 16, "color": "#ffffff", "face": "Arial", "multi": True},
+            "borderWidth": 3,
+        })
+        added_companies.add(symbol)
+
+        for row in company_rows:
+            hname = row["Shareholder Name"]
+            pct = float(row.get("Ownership %", 0) or 0)
+            shares = row.get("Shares Held", 0)
+            htype = classify_holder_type(hname)
+            color = type_colors.get(htype, "#7f8c8d")
+            hsize = max(12, min(30, pct * 2))
+
+            hid = f"HOLDER_{hash(hname) % 10**9}"
+            nodes.append({
+                "id": hid,
+                "label": hname[:25],
+                "title": f"<b>{hname}</b><br>Type: {htype}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>{hname}</b><br>Type: {htype}<br>Shares: {shares}<br>Ownership: {pct:.2f}%",
+                "group": htype,
+                "color": {"background": color, "border": "#ffffff"},
+                "size": hsize, "shape": "dot",
+                "font": {"size": 11, "color": "#c0d0e0"},
+                "borderWidth": 1,
+            })
+
+            ew = min(8, max(0.5, pct / 3))
+            edges.append({
+                "id": f"E_{symbol}_{hid}",
+                "from": hid, "to": f"COMPANY_{symbol}",
+                "value": pct,
+                "width": ew,
+                "label": f"{pct:.2f}%",
+                "title": f"<b>Ownership</b><br>Shareholder: {hname}<br>Company: {symbol}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>Ownership</b><br>Shareholder: {hname}<br>Company: {symbol}<br>Shares: {shares}<br>Percent: {pct:.2f}%<br>As of: {row.get('As of Date', 'N/A')}<br>Source: {row.get('Source URL', 'N/A')}",
+                "color": {"color": "#4fc3f7", "opacity": max(0.3, min(1.0, pct / 20))},
+            })
+
+    return nodes, edges
 
 period = st.sidebar.selectbox("Data Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
 
@@ -337,12 +413,8 @@ with tab1:
     st.markdown("### SET50 Index Chart")
     fig = go.Figure()
     fig.add_trace(go.Candlestick(
-        x=index_df.index,
-        open=index_df["Open"],
-        high=index_df["High"],
-        low=index_df["Low"],
-        close=index_df["Close"],
-        name="SET50",
+        x=index_df.index, open=index_df["Open"], high=index_df["High"],
+        low=index_df["Low"], close=index_df["Close"], name="SET50",
     ))
     fig.update_layout(height=500, xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, width='stretch')
@@ -368,7 +440,6 @@ with tab2:
         book_close = entry.get("bookCloseDate", "")
         as_of = book_close[:10] if len(book_close) >= 10 else "N/A"
         source_url = f"https://www.set.or.th/en/market/product/stock/quote/{sym}/major-shareholders"
-
         note = ""
         if as_of != "N/A":
             try:
@@ -377,19 +448,15 @@ with tab2:
                     note = f"Data older than 1 year (as of {as_of})"
             except:
                 pass
-
         for holder in entry.get("majorShareholders", [])[:10]:
             all_rows.append({
-                "Symbol": sym,
-                "Company": company_name,
+                "Symbol": sym, "Company": company_name,
                 "Rank": holder.get("sequence"),
                 "Shareholder Name": holder.get("name"),
                 "Shares Held": holder.get("numberOfShare"),
                 "Ownership %": holder.get("percentOfShare"),
-                "As of Date": as_of,
-                "Source": "Stock Exchange of Thailand (SET)",
-                "Source URL": source_url,
-                "Note": note,
+                "As of Date": as_of, "Source": "Stock Exchange of Thailand (SET)",
+                "Source URL": source_url, "Note": note,
                 "NVDR": holder.get("isThaiNVDR", False),
             })
 
@@ -436,7 +503,6 @@ with tab2:
         display_df[["Symbol","Company","Rank","Shareholder Name","Shares Held","Ownership %","As of Date","Source","Note"]],
         width='stretch', hide_index=True,
     )
-
     st.markdown(f"**Showing {len(df_shares)} shareholder records**")
 
     st.markdown("---")
@@ -449,127 +515,153 @@ with tab2:
             avg_ownership = avg_ownership.sort_values("Top 5 Ownership %", ascending=False)
             fig_own = px.bar(
                 avg_ownership.head(20), x="Symbol", y="Top 5 Ownership %",
-                color="Top 5 Ownership %", color_continuous_scale="Blues",
-                text_auto=".1f",
+                color="Top 5 Ownership %", color_continuous_scale="Blues", text_auto=".1f",
             )
             fig_own.update_layout(xaxis_title="Company", yaxis_title="Top 5 Shareholders Total %", height=400)
             st.plotly_chart(fig_own, width='stretch')
 
     st.markdown("---")
     st.markdown("#### Shareholder Relationship Graph")
-    st.markdown("Visualize the ownership relationship between a selected company and its top shareholders.")
+    st.markdown("Explore ownership relationships — select **All** to see cross-company connections.")
 
-    graph_sym = st.selectbox(
-        "Select a company to visualize:",
-        sorted(SET50_CONSTITUENTS),
-        key="graph_symbol",
+    graph_sel = st.selectbox(
+        "Stock filter:", ["All"] + sorted(SET50_CONSTITUENTS), key="graph_sel"
     )
 
-    col_controls, col_legend = st.columns([2, 1])
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        gtop_n = st.radio("Show top:", [5, 10, 20], horizontal=True, index=1, key="gtop")
+    with col_f2:
+        gmin_pct = st.selectbox("Min ownership:", ["All", ">=1%", ">=5%", ">=10%", ">=25%"], index=0, key="gpct")
+    with col_f3:
+        gtype = st.selectbox(
+            "Holder type:", ["All", "government", "institution", "fund", "company", "individual", "nvdr"],
+            key="gtype"
+        )
 
-    with col_controls:
-        top_n = st.radio("Show:", [5, 10], horizontal=True, index=1, key="graph_topn")
-        min_pct = st.slider("Minimum ownership %:", 0.0, 5.0, 0.0, 0.1, key="graph_minpct")
-
-    with col_legend:
-        st.markdown("**Node Types:**")
-        legend_items = {
-            "government": "#e74c3c",
-            "nvdr": "#9b59b6",
-            "fund": "#2ecc71",
-            "institution": "#f39c12",
-            "company": "#1abc9c",
-            "individual": "#95a5a6",
-            "unknown": "#7f8c8d",
-        }
-        for ltype, lcolor in legend_items.items():
-            st.markdown(
-                f'<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{lcolor};margin-right:6px;"></span>'
-                f'{ltype}',
-                unsafe_allow_html=True,
-            )
+    gmin_val = 0.0
+    if gmin_pct == ">=1%":
+        gmin_val = 1.0
+    elif gmin_pct == ">=5%":
+        gmin_val = 5.0
+    elif gmin_pct == ">=10%":
+        gmin_val = 10.0
+    elif gmin_pct == ">=25%":
+        gmin_val = 25.0
 
     rows_for_graph = []
     for sym in SET50_CONSTITUENTS:
         rows_for_graph.extend(get_shareholders_for_symbol(sym, sh_data))
 
-    rows_for_graph_df = pd.DataFrame(rows_for_graph)
-    net = build_shareholder_graph(graph_sym, rows_for_graph, top_n=top_n, min_pct=min_pct)
+    graph_sym = "ALL" if graph_sel == "All" else graph_sel
+    gtop_actual = 3 if graph_sym == "ALL" else gtop_n
+    nodes_data, edges_data = build_graph_data(
+        graph_sym, rows_for_graph,
+        top_n=gtop_actual, min_pct=gmin_val,
+        holder_types=gtype if gtype != "All" else None,
+    )
 
-    graph_html = net.generate_html()
-    graph_html = graph_html.replace('width="100%"', 'width="100%"').replace('height="550px"', 'height="550px"')
-    graph_html = graph_html.replace("</body>", """
-    <script>
-    document.addEventListener('click', function(e) {
-        var target = e.target;
-        while (target && target.tagName !== 'DIV') target = target.parentNode;
-        if (target && target._nodeId) {
-            var input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'selected_node';
-            input.value = target._nodeId;
-            document.body.appendChild(input);
-        }
-    });
-    </script>
-    </body>""")
+    col_graph, col_detail = st.columns([0.7, 0.3])
 
-    st.components.v1.html(graph_html, height=600, scrolling=False)
+    with col_graph:
+        if nodes_data:
+            html = make_shareholder_graph_html(nodes_data, edges_data)
+            st.components.v1.html(html, height=600, scrolling=False)
 
-    st.markdown("**Shareholder Details**")
-    detail_rows = rows_for_graph_df[rows_for_graph_df["Symbol"] == graph_sym].copy()
-    if not detail_rows.empty:
-        detail_display = detail_rows.copy()
-        detail_display["Type"] = detail_display["Shareholder Name"].apply(classify_holder_type)
-        detail_display["Shares Held"] = detail_display["Shares Held"].apply(
-            lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A"
+            legend_html = "<div style='display:flex;flex-wrap:wrap;gap:12px;padding:8px 0;font-size:13px;color:#ccc;'>"
+            legend_items = {
+                "company": "#1a73e8", "government": "#e74c3c", "nvdr": "#9b59b6",
+                "fund": "#27ae60", "institution": "#f39c12", "company (holder)": "#1abc9c",
+                "individual": "#e91e63", "unknown": "#7f8c8d",
+            }
+            for lname, lcolor in legend_items.items():
+                legend_html += f"<span style='display:flex;align-items:center;gap:4px'><span style='width:10px;height:10px;border-radius:50%;background:{lcolor}'></span>{lname}</span>"
+            legend_html += "</div>"
+            st.markdown(legend_html, unsafe_allow_html=True)
+        else:
+            st.info("No nodes match the current filters.")
+
+    with col_detail:
+        st.markdown("#### Node Details")
+        all_node_ids = [n["id"] for n in nodes_data]
+        node_labels = {}
+        node_map = {}
+        for n in nodes_data:
+            node_labels[n["id"]] = n.get("label", n["id"])
+            node_map[n["id"]] = n
+
+        if "graph_selected_node" not in st.session_state:
+            st.session_state.graph_selected_node = ""
+
+        selected_id = st.selectbox(
+            "Select a node:",
+            [""] + all_node_ids,
+            format_func=lambda x: node_labels.get(x, "None") if x else "None",
+            key="graph_node_selector",
         )
-        detail_display["Ownership %"] = detail_display["Ownership %"].apply(
-            lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A"
-        )
-        st.dataframe(
-            detail_display[["Rank", "Shareholder Name", "Type", "Shares Held", "Ownership %", "As of Date"]],
-            width='stretch', hide_index=True,
-        )
 
-    if sel_symbol != "All":
-        st.markdown("#### Node Detail")
-        st.info("Click on a node in the graph to see its details (hover tooltip also available).")
+        if selected_id and selected_id in node_map:
+            nd = node_map[selected_id]
+            is_company = nd.get("group") == "company"
 
+            if is_company:
+                sym = nd["label"].split("\n")[0]
+                cname = SET50_NAMES.get(sym, sym)
+                st.markdown(f"**Company:** {sym}")
+                st.markdown(f"**Name:** {cname}")
+                company_holders = [r for r in rows_for_graph if r["Symbol"] == sym]
+                st.markdown(f"**Shareholders:** {len(company_holders)}")
+                st.markdown("**Top 5:**")
+                for r in company_holders[:5]:
+                    pct = r.get("Ownership %", 0)
+                    st.markdown(f"- {r['Shareholder Name'][:30]}: {pct:.2f}%" if isinstance(pct, (int, float)) else f"- {r['Shareholder Name'][:30]}: {pct}%")
+            else:
+                hname_clean = node_labels.get(selected_id, "Unknown")
+                htype = nd.get("group", "unknown")
+                owned = []
+                for e in edges_data:
+                    if e["from"] == selected_id:
+                        target_sym = e["to"].replace("COMPANY_", "")
+                        owned.append((target_sym, e.get("value", 0)))
+                st.markdown(f"**Holder:** {hname_clean}")
+                st.markdown(f"**Type:** {htype}")
+                st.markdown(f"**Companies owned:** {len(owned)}")
+                if owned:
+                    st.markdown("**Ownership:**")
+                    for osym, opct in sorted(owned, key=lambda x: x[1], reverse=True):
+                        st.markdown(f"- {osym}: {opct:.2f}%")
+        else:
+            st.info("Select a node to view details.\n\nHover over graph nodes for tooltips or click to track.")
+
+    st.markdown("---")
     st.caption("Note: Shareholder names are displayed as registered in the SET system (mostly in Thai). "
                "NVDR (Thai NVDR) indicates shares held through Thai NVDR Company Limited, "
                "which represents foreign investors holding through the non-voting depository receipt program.")
 
 with tab3:
     st.header("Top Gainers & Losers")
-
     if not stocks_summary.empty:
         valid = stocks_summary.dropna(subset=["Change%"])
         if not valid.empty:
             top_gainers = valid.nlargest(5, "Change%")
             top_losers = valid.nsmallest(5, "Change%")
-
             col_left, col_right = st.columns(2)
             with col_left:
                 st.markdown("#### Top Gainers")
                 fig_gain = px.bar(
                     top_gainers, x="Change%", y="Name", orientation="h",
-                    color="Change%", color_continuous_scale="RdYlGn",
-                    text_auto=".2f",
+                    color="Change%", color_continuous_scale="RdYlGn", text_auto=".2f",
                 )
                 fig_gain.update_layout(height=300, showlegend=False, yaxis={"categoryorder": "total ascending"})
                 st.plotly_chart(fig_gain, width='stretch')
-
             with col_right:
                 st.markdown("#### Top Losers")
                 fig_loss = px.bar(
                     top_losers, x="Change%", y="Name", orientation="h",
-                    color="Change%", color_continuous_scale="RdYlGn_r",
-                    text_auto=".2f",
+                    color="Change%", color_continuous_scale="RdYlGn_r", text_auto=".2f",
                 )
                 fig_loss.update_layout(height=300, showlegend=False, yaxis={"categoryorder": "total ascending"})
                 st.plotly_chart(fig_loss, width='stretch')
-
         if not stocks_summary.dropna(subset=["MarketCap"]).empty:
             st.markdown("#### Market Cap Distribution")
             marketcap_data = stocks_summary.dropna(subset=["MarketCap"]).nlargest(15, "MarketCap")
