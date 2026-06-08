@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 import json, os, time, re
 from datetime import datetime, timedelta
 from pyvis.network import Network
-import networkx as nx
 
 st.set_page_config(page_title="SET50 Dashboard", layout="wide")
 st.title("SET50 Thailand Dashboard")
