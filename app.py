@@ -3,8 +3,10 @@ import yfinance as yf
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import json, os, time
+import json, os, time, re
 from datetime import datetime, timedelta
+from pyvis.network import Network
+import networkx as nx
 
 st.set_page_config(page_title="SET50 Dashboard", layout="wide")
 st.title("SET50 Thailand Dashboard")
@@ -98,6 +100,208 @@ def load_shareholder_data():
         return None
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+def classify_holder_type(name):
+    if not name:
+        return "unknown"
+    name_upper = name.upper()
+
+    government_patterns = [
+        "กระทรวง", "กองทุนรวม วายุภักษ์", "สำนักงาน", "กองทุนบำเหน็จ",
+        "MINISTRY", "GOVERNMENT", "TREASURY", "FIDF", "Bank of Thailand",
+        "กระทรวงการคลัง", "ธนาคารแห่งประเทศไทย",
+    ]
+    for pat in government_patterns:
+        if pat.upper() in name_upper or pat in name:
+            return "government"
+
+    if "ไทยเอ็นวีดีอาร์" in name or "THAI NVDR" in name_upper or name_upper == "THAI NVDR COMPANY LIMITED":
+        return "nvdr"
+
+    fund_patterns = [
+        "กองทุน", " FUND", "FUND ", "VAYUPAK", "กองทุนรวม",
+    ]
+    for pat in fund_patterns:
+        if pat.upper() in name_upper or pat in name:
+            return "fund"
+
+    bank_patterns = [
+        "ธนาคาร", "BANK", "KBANK", "SCB", "BBL", "KTB", "TISCO", "TCAP", "KKP",
+        "UBS", "BNP PARIBAS", "CITI", "CITIBANK", "HSBC", "STATE STREET BANK",
+        "BANK OF NEW YORK", "BANK OF SINGAPORE", "MORGAN STANLEY",
+    ]
+    for pat in bank_patterns:
+        if pat in name_upper:
+            return "institution"
+
+    insurance_patterns = [
+        "ประกัน", "INSURANCE", "TLI", "ไทยประกัน",
+    ]
+    for pat in insurance_patterns:
+        if pat in name_upper or pat in name:
+            return "institution"
+
+    coop_patterns = [
+        "สหกรณ์", "COOPERATIVE", "ชุมนุมสหกรณ์",
+    ]
+    for pat in coop_patterns:
+        if pat in name_upper or pat in name:
+            return "institution"
+
+    company_patterns = [
+        "บริษัท", " จำกัด", "CORPORATION", "INC.", "PLC", "LIMITED", "LTD",
+        "HOLDINGS", "HOLDING", "PTE.", "PCL", "PUBLIC COMPANY",
+    ]
+    for pat in company_patterns:
+        if pat in name_upper or pat in name:
+            return "company"
+
+    nominee_patterns = [
+        "NOMINEE", "NOMINEES",
+    ]
+    for pat in nominee_patterns:
+        if pat in name_upper:
+            return "institution"
+
+    if name_upper == name and any(c.isalpha() for c in name):
+        return "institution"
+
+    return "individual"
+
+def build_shareholder_graph(symbol, sh_data_rows, top_n=10, min_pct=0.0):
+    net = Network(height="550px", width="100%", directed=True, bgcolor="#ffffff", font_color="#333333")
+
+    net.barnes_hut(gravity=-3000, central_gravity=0.3, spring_length=200, spring_strength=0.01, damping=0.09)
+
+    company_name = SET50_NAMES.get(symbol, symbol)
+    net.add_node(
+        f"COMPANY_{symbol}",
+        label=f"{symbol}\n{company_name[:30]}",
+        title=f"<b>{symbol}</b><br>{company_name}",
+        size=40,
+        color="#1a73e8",
+        font={"size": 16, "face": "Arial", "color": "#ffffff"},
+        shape="box",
+        borderWidth=2,
+        borderColor="#0d47a1",
+    )
+
+    filtered = [r for r in sh_data_rows if r["Symbol"] == symbol]
+    filtered = [r for r in filtered if float(r.get("Ownership %", 0) or 0) >= min_pct]
+    filtered = sorted(filtered, key=lambda r: float(r.get("Ownership %", 0) or 0), reverse=True)[:top_n]
+
+    type_colors = {
+        "government": "#e74c3c",
+        "nvdr": "#9b59b6",
+        "fund": "#2ecc71",
+        "institution": "#f39c12",
+        "company": "#1abc9c",
+        "individual": "#95a5a6",
+        "unknown": "#7f8c8d",
+    }
+
+    for row in filtered:
+        holder_name = row.get("Shareholder Name", "Unknown")
+        pct = float(row.get("Ownership %", 0) or 0)
+        shares = row.get("Shares Held", 0)
+        htype = classify_holder_type(holder_name)
+        color = type_colors.get(htype, "#7f8c8d")
+        hsize = max(10, min(25, pct * 1.5))
+
+        safe_name = re.sub(r'[^\w\s]', '', holder_name)[:40]
+        node_id = f"HOLDER_{hash(holder_name) % 10**8}"
+
+        title_text = (
+            f"<b>{holder_name}</b><br>"
+            f"Type: {htype}<br>"
+            f"Shares: {shares:,.0f}<br>"
+            f"Ownership: {pct:.2f}%<br>"
+            f"As of: {row.get('As of Date', 'N/A')}"
+        )
+
+        net.add_node(
+            node_id,
+            label=safe_name[:25],
+            title=title_text,
+            size=hsize,
+            color=color,
+            font={"size": 11, "face": "Arial"},
+            shape="ellipse",
+            borderWidth=1,
+        )
+
+        edge_width = max(1, min(8, pct / 2))
+        net.add_edge(
+            node_id,
+            f"COMPANY_{symbol}",
+            value=pct,
+            title=f"Ownership: {pct:.2f}%<br>Shares: {shares:,.0f}<br>As of: {row.get('As of Date', 'N/A')}<br>Source: {row.get('Source URL', 'N/A')}",
+            width=edge_width,
+            color={"color": "#2c3e50", "opacity": 0.7},
+            arrowStrikethrough=False,
+            smooth={"type": "curvedCW", "roundness": 0.1},
+        )
+
+    net.set_options("""
+    {
+      "interaction": {
+        "hover": true,
+        "tooltipDelay": 100,
+        "navigationButtons": true,
+        "keyboard": true,
+        "zoomView": true,
+        "dragView": true
+      },
+      "physics": {
+        "barnesHut": {
+          "gravitationalConstant": -3000,
+          "centralGravity": 0.3,
+          "springLength": 200,
+          "springConstant": 0.01,
+          "damping": 0.09
+        },
+        "stabilization": {
+          "enabled": true,
+          "iterations": 100,
+          "updateInterval": 25
+        }
+      },
+      "edges": {
+        "arrows": {
+          "to": {
+            "enabled": true,
+            "type": "arrow",
+            "scaleFactor": 1.2
+          }
+        }
+      }
+    }
+    """)
+
+    return net
+
+def get_shareholders_for_symbol(symbol, sh_data):
+    entry = sh_data.get("data", {}).get(symbol, {})
+    if "error" in entry:
+        return []
+    company_name = SET50_NAMES.get(symbol, symbol)
+    book_close = entry.get("bookCloseDate", "")
+    as_of = book_close[:10] if len(book_close) >= 10 else "N/A"
+    source_url = f"https://www.set.or.th/en/market/product/stock/quote/{symbol}/major-shareholders"
+    rows = []
+    for holder in entry.get("majorShareholders", [])[:10]:
+        rows.append({
+            "Symbol": symbol,
+            "Company": company_name,
+            "Rank": holder.get("sequence"),
+            "Shareholder Name": holder.get("name"),
+            "Shares Held": holder.get("numberOfShare"),
+            "Ownership %": holder.get("percentOfShare"),
+            "As of Date": as_of,
+            "Source": "Stock Exchange of Thailand (SET)",
+            "Source URL": source_url,
+        })
+    return rows
 
 period = st.sidebar.selectbox("Data Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
 
@@ -238,21 +442,100 @@ with tab2:
 
     st.markdown("---")
     st.markdown("#### Ownership Distribution by Company")
-    avg_ownership = df_shares.groupby("Symbol").apply(
-        lambda x: x.nlargest(5, "Ownership %")["Ownership %"].sum()
-    ).reset_index(name="Top 5 Ownership %")
-    avg_ownership = avg_ownership.sort_values("Top 5 Ownership %", ascending=False)
+    if not df_shares.empty and "Ownership %" in df_shares.columns:
+        avg_ownership = df_shares.groupby("Symbol").apply(
+            lambda x: x.nlargest(5, "Ownership %")["Ownership %"].sum()
+        ).reset_index(name="Top 5 Ownership %")
+        if not avg_ownership.empty:
+            avg_ownership = avg_ownership.sort_values("Top 5 Ownership %", ascending=False)
+            fig_own = px.bar(
+                avg_ownership.head(20), x="Symbol", y="Top 5 Ownership %",
+                color="Top 5 Ownership %", color_continuous_scale="Blues",
+                text_auto=".1f",
+            )
+            fig_own.update_layout(xaxis_title="Company", yaxis_title="Top 5 Shareholders Total %", height=400)
+            st.plotly_chart(fig_own, width='stretch')
 
-    fig_own = px.bar(
-        avg_ownership.head(20), x="Symbol", y="Top 5 Ownership %",
-        color="Top 5 Ownership %", color_continuous_scale="Blues",
-        text_auto=".1f",
+    st.markdown("---")
+    st.markdown("#### Shareholder Relationship Graph")
+    st.markdown("Visualize the ownership relationship between a selected company and its top shareholders.")
+
+    graph_sym = st.selectbox(
+        "Select a company to visualize:",
+        sorted(SET50_CONSTITUENTS),
+        key="graph_symbol",
     )
-    fig_own.update_layout(
-        xaxis_title="Company", yaxis_title="Top 5 Shareholders Total %",
-        height=400,
-    )
-    st.plotly_chart(fig_own, width='stretch')
+
+    col_controls, col_legend = st.columns([2, 1])
+
+    with col_controls:
+        top_n = st.radio("Show:", [5, 10], horizontal=True, index=1, key="graph_topn")
+        min_pct = st.slider("Minimum ownership %:", 0.0, 5.0, 0.0, 0.1, key="graph_minpct")
+
+    with col_legend:
+        st.markdown("**Node Types:**")
+        legend_items = {
+            "government": "#e74c3c",
+            "nvdr": "#9b59b6",
+            "fund": "#2ecc71",
+            "institution": "#f39c12",
+            "company": "#1abc9c",
+            "individual": "#95a5a6",
+            "unknown": "#7f8c8d",
+        }
+        for ltype, lcolor in legend_items.items():
+            st.markdown(
+                f'<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{lcolor};margin-right:6px;"></span>'
+                f'{ltype}',
+                unsafe_allow_html=True,
+            )
+
+    rows_for_graph = []
+    for sym in SET50_CONSTITUENTS:
+        rows_for_graph.extend(get_shareholders_for_symbol(sym, sh_data))
+
+    rows_for_graph_df = pd.DataFrame(rows_for_graph)
+    net = build_shareholder_graph(graph_sym, rows_for_graph, top_n=top_n, min_pct=min_pct)
+
+    graph_html = net.generate_html()
+    graph_html = graph_html.replace('width="100%"', 'width="100%"').replace('height="550px"', 'height="550px"')
+    graph_html = graph_html.replace("</body>", """
+    <script>
+    document.addEventListener('click', function(e) {
+        var target = e.target;
+        while (target && target.tagName !== 'DIV') target = target.parentNode;
+        if (target && target._nodeId) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selected_node';
+            input.value = target._nodeId;
+            document.body.appendChild(input);
+        }
+    });
+    </script>
+    </body>""")
+
+    st.components.v1.html(graph_html, height=600, scrolling=False)
+
+    st.markdown("**Shareholder Details**")
+    detail_rows = rows_for_graph_df[rows_for_graph_df["Symbol"] == graph_sym].copy()
+    if not detail_rows.empty:
+        detail_display = detail_rows.copy()
+        detail_display["Type"] = detail_display["Shareholder Name"].apply(classify_holder_type)
+        detail_display["Shares Held"] = detail_display["Shares Held"].apply(
+            lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A"
+        )
+        detail_display["Ownership %"] = detail_display["Ownership %"].apply(
+            lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A"
+        )
+        st.dataframe(
+            detail_display[["Rank", "Shareholder Name", "Type", "Shares Held", "Ownership %", "As of Date"]],
+            width='stretch', hide_index=True,
+        )
+
+    if sel_symbol != "All":
+        st.markdown("#### Node Detail")
+        st.info("Click on a node in the graph to see its details (hover tooltip also available).")
 
     st.caption("Note: Shareholder names are displayed as registered in the SET system (mostly in Thai). "
                "NVDR (Thai NVDR) indicates shares held through Thai NVDR Company Limited, "
