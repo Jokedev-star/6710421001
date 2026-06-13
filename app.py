@@ -158,8 +158,8 @@ def make_shareholder_graph_html(nodes, edges):
     nodes_json = json.dumps(nodes, ensure_ascii=False)
     edges_json = json.dumps(edges, ensure_ascii=False)
     return f"""
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.0.2/dist/dist/vis-network.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.0.2/dist/vis-network.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vis-network@10.0.2/dist/dist/vis-network.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/vis-network@10.0.2/standalone/umd/vis-network.min.js"></script>
 <style>
 #graph-wrap {{ position:relative; width:100%; background:#0f1923; overflow:hidden; }}
 #mynetwork {{ width:100%; height:600px; }}
@@ -250,6 +250,7 @@ def build_graph_data(symbol, all_shareholder_rows, top_n=10, min_pct=0.0, holder
     nodes = []
     edges = []
     seen_holders = {}
+    seen_edges = set()
     added_companies = set()
 
     if is_all:
@@ -300,16 +301,19 @@ def build_graph_data(symbol, all_shareholder_rows, top_n=10, min_pct=0.0, holder
                         "borderWidth": 1,
                     })
 
-                ew = min(6, max(0.5, pct / 5))
-                edges.append({
-                    "id": f"E_{sym}_{hid}",
-                    "from": hid, "to": f"COMPANY_{sym}",
-                    "value": pct,
-                    "width": ew,
-                    "label": f"{pct:.1f}%",
-                    "title": f"<b>{hname}</b> owns {pct:.2f}% of {sym}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>{hname}</b> owns {pct:.2f}% of {sym}<br>Shares: {shares}",
-                    "color": {"color": "#4a5a6a", "opacity": max(0.2, min(0.8, pct / 25))},
-                })
+                edge_id = f"E_{sym}_{hid}"
+                if edge_id not in seen_edges:
+                    seen_edges.add(edge_id)
+                    ew = min(6, max(0.5, pct / 5))
+                    edges.append({
+                        "id": edge_id,
+                        "from": hid, "to": f"COMPANY_{sym}",
+                        "value": pct,
+                        "width": ew,
+                        "label": f"{pct:.1f}%",
+                        "title": f"<b>{hname}</b> owns {pct:.2f}% of {sym}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>{hname}</b> owns {pct:.2f}% of {sym}<br>Shares: {shares}",
+                        "color": {"color": "#4a5a6a", "opacity": max(0.2, min(0.8, pct / 25))},
+                    })
 
     else:
         company_rows = [r for r in all_shareholder_rows if r["Symbol"] == symbol]
@@ -341,27 +345,32 @@ def build_graph_data(symbol, all_shareholder_rows, top_n=10, min_pct=0.0, holder
             hsize = max(12, min(30, pct * 2))
 
             hid = f"HOLDER_{hash(hname) % 10**9}"
-            nodes.append({
-                "id": hid,
-                "label": hname[:25],
-                "title": f"<b>{hname}</b><br>Type: {htype}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>{hname}</b><br>Type: {htype}<br>Shares: {shares}<br>Ownership: {pct:.2f}%",
-                "group": htype,
-                "color": {"background": color, "border": "#ffffff"},
-                "size": hsize, "shape": "dot",
-                "font": {"size": 11, "color": "#c0d0e0"},
-                "borderWidth": 1,
-            })
+            if hid not in seen_holders:
+                seen_holders[hid] = hname
+                nodes.append({
+                    "id": hid,
+                    "label": hname[:25],
+                    "title": f"<b>{hname}</b><br>Type: {htype}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>{hname}</b><br>Type: {htype}<br>Shares: {shares}<br>Ownership: {pct:.2f}%",
+                    "group": htype,
+                    "color": {"background": color, "border": "#ffffff"},
+                    "size": hsize, "shape": "dot",
+                    "font": {"size": 11, "color": "#c0d0e0"},
+                    "borderWidth": 1,
+                })
 
-            ew = min(8, max(0.5, pct / 3))
-            edges.append({
-                "id": f"E_{symbol}_{hid}",
-                "from": hid, "to": f"COMPANY_{symbol}",
-                "value": pct,
-                "width": ew,
-                "label": f"{pct:.2f}%",
-                "title": f"<b>Ownership</b><br>Shareholder: {hname}<br>Company: {symbol}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>Ownership</b><br>Shareholder: {hname}<br>Company: {symbol}<br>Shares: {shares}<br>Percent: {pct:.2f}%<br>As of: {row.get('As of Date', 'N/A')}<br>Source: {row.get('Source URL', 'N/A')}",
-                "color": {"color": "#4fc3f7", "opacity": max(0.3, min(1.0, pct / 20))},
-            })
+            edge_id = f"E_{symbol}_{hid}"
+            if edge_id not in seen_edges:
+                seen_edges.add(edge_id)
+                ew = min(8, max(0.5, pct / 3))
+                edges.append({
+                    "id": edge_id,
+                    "from": hid, "to": f"COMPANY_{symbol}",
+                    "value": pct,
+                    "width": ew,
+                    "label": f"{pct:.2f}%",
+                    "title": f"<b>Ownership</b><br>Shareholder: {hname}<br>Company: {symbol}<br>Shares: {{:,}}".format(shares) if isinstance(shares, int) else f"<b>Ownership</b><br>Shareholder: {hname}<br>Company: {symbol}<br>Shares: {shares}<br>Percent: {pct:.2f}%<br>As of: {row.get('As of Date', 'N/A')}<br>Source: {row.get('Source URL', 'N/A')}",
+                    "color": {"color": "#4fc3f7", "opacity": max(0.3, min(1.0, pct / 20))},
+                })
 
     return nodes, edges
 
@@ -472,16 +481,25 @@ with tab1:
 
     st.markdown("---")
     st.markdown("#### Shareholder Relationship Graph")
-    st.markdown("Showing all SET50 companies with their top shareholders.")
+
+    gcol1, gcol2, gcol3, gcol4 = st.columns(4)
+    with gcol1:
+        graph_company = st.selectbox("Company", ["ALL"] + sorted(SET50_CONSTITUENTS), key="graph_company")
+    with gcol2:
+        graph_top_n = st.slider("Top N shareholders", 3, 10, 5, key="graph_top_n")
+    with gcol3:
+        graph_min_pct = st.slider("Min ownership %", 0.0, 20.0, 0.0, 0.5, key="graph_min_pct")
+    with gcol4:
+        graph_holder_type = st.selectbox("Holder type", ["All", "government", "nvdr", "fund", "institution", "company", "individual"], key="graph_holder_type")
 
     rows_for_graph = []
     for sym in SET50_CONSTITUENTS:
         rows_for_graph.extend(get_shareholders_for_symbol(sym, sh_data))
 
     nodes_data, edges_data = build_graph_data(
-        "ALL", rows_for_graph,
-        top_n=40, min_pct=0.0,
-        holder_types=None,
+        graph_company, rows_for_graph,
+        top_n=graph_top_n, min_pct=graph_min_pct,
+        holder_types=graph_holder_type if graph_holder_type != "All" else None,
     )
 
     col_graph, col_detail = st.columns([0.7, 0.3])
@@ -489,7 +507,7 @@ with tab1:
     with col_graph:
         if nodes_data:
             html = make_shareholder_graph_html(nodes_data, edges_data)
-            st.html(html, unsafe_allow_javascript=True)
+            st.iframe(html, height=650)
 
             legend_html = "<div style='display:flex;flex-wrap:wrap;gap:12px;padding:8px 0;font-size:13px;color:#ccc;'>"
             legend_items = {
