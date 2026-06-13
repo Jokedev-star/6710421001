@@ -157,17 +157,12 @@ def get_shareholders_for_symbol(symbol, sh_data):
 def make_shareholder_graph_html(nodes, edges):
     nodes_json = json.dumps(nodes, ensure_ascii=False)
     edges_json = json.dumps(edges, ensure_ascii=False)
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.0.2/dist/vis-network.min.js"></script>
+    return f"""
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.0.2/dist/dist/vis-network.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.0.2/dist/vis-network.min.js"></script>
 <style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-html, body {{ height:100%; }}
-body {{ background:#0f1923; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; overflow:hidden; }}
-#mynetwork {{ width:100%; height:100%; }}
+#graph-wrap {{ position:relative; width:100%; background:#0f1923; overflow:hidden; }}
+#mynetwork {{ width:100%; height:600px; }}
 #tooltip {{
   position:absolute; display:none; background:rgba(15,25,35,0.95); color:#e0e0e0;
   padding:10px 14px; border-radius:8px; font-size:13px; line-height:1.5;
@@ -176,11 +171,12 @@ body {{ background:#0f1923; font-family:-apple-system,BlinkMacSystemFont,'Segoe 
 }}
 #tooltip b {{ color:#fff; }}
 </style>
-</head>
-<body>
+<div id="graph-wrap">
 <div id="mynetwork"></div>
 <div id="tooltip"></div>
+</div>
 <script>
+try {{
 var nodes = new vis.DataSet({nodes_json});
 var edges = new vis.DataSet({edges_json});
 var container = document.getElementById('mynetwork');
@@ -214,36 +210,33 @@ network.fit();
 
 network.on('hoverNode', function(p) {{
   var node = nodes.get(p.node);
-  document.getElementById('tooltip').innerHTML = node.title || node.label;
-  document.getElementById('tooltip').style.display = 'block';
+  var t = document.getElementById('tooltip');
+  if (t) {{ t.innerHTML = node.title || node.label; t.style.display = 'block'; }}
 }});
 network.on('hoverEdge', function(p) {{
   var edge = edges.get(p.edge);
-  document.getElementById('tooltip').innerHTML = edge.title || '';
-  document.getElementById('tooltip').style.display = 'block';
+  var t = document.getElementById('tooltip');
+  if (t) {{ t.innerHTML = edge.title || ''; t.style.display = 'block'; }}
 }});
-network.on('blurNode', function() {{ document.getElementById('tooltip').style.display = 'none'; }});
-network.on('blurEdge', function() {{ document.getElementById('tooltip').style.display = 'none'; }});
+network.on('blurNode', function() {{ var t = document.getElementById('tooltip'); if (t) t.style.display = 'none'; }});
+network.on('blurEdge', function() {{ var t = document.getElementById('tooltip'); if (t) t.style.display = 'none'; }});
 
 network.on('click', function(p) {{
   if (p.nodes.length > 0) {{
     var node = nodes.get(p.nodes[0]);
-    sessionStorage.setItem('selectedNode', JSON.stringify({{ id: node.id, type: node.group === 'company' ? 'company' : 'holder', label: node.label }}));
-    document.getElementById('tooltip').innerHTML = '<b>Selected:</b> ' + (node.title || node.label) + '<br><small>View details below</small>';
-    document.getElementById('tooltip').style.display = 'block';
-  }} else if (p.edges.length > 0) {{
-    var edge = edges.get(p.edges[0]);
-    sessionStorage.setItem('selectedNode', JSON.stringify({{ id: edge.id, type: 'edge', label: edge.title || '' }}));
+    var t = document.getElementById('tooltip');
+    if (t) {{ t.innerHTML = '<b>Selected:</b> ' + (node.title || node.label) + '<br><small>View details below</small>'; t.style.display = 'block'; }}
   }}
 }});
 
 document.addEventListener('mousemove', function(e) {{
   var t = document.getElementById('tooltip');
-  if (t.style.display === 'block') {{ t.style.left = (e.clientX + 15) + 'px'; t.style.top = (e.clientY + 15) + 'px'; }}
+  if (t && t.style.display === 'block') {{ t.style.left = (e.clientX + 15) + 'px'; t.style.top = (e.clientY + 15) + 'px'; }}
 }});
-</script>
-</body>
-</html>"""
+}} catch(e) {{
+  document.getElementById('mynetwork').innerHTML = '<div style=\"padding:20px;color:#ff6b6b;background:#0f1923;font-family:sans-serif;\">Graph error: ' + e.message + '</div>';
+}}
+</script>"""
 
 def build_graph_data(symbol, all_shareholder_rows, top_n=10, min_pct=0.0, holder_types=None, layout="force"):
     is_all = symbol == "ALL"
@@ -496,7 +489,7 @@ with tab1:
     with col_graph:
         if nodes_data:
             html = make_shareholder_graph_html(nodes_data, edges_data)
-            st.components.v1.html(html, height=600, scrolling=False)
+            st.html(html, unsafe_allow_javascript=True)
 
             legend_html = "<div style='display:flex;flex-wrap:wrap;gap:12px;padding:8px 0;font-size:13px;color:#ccc;'>"
             legend_items = {
