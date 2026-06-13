@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import json, os, re, random
 from datetime import datetime, timedelta
 
@@ -61,13 +60,6 @@ SET50_NAMES = {
     "LH":"Land and Houses","CENTEL":"Central Plaza Hotel","SAWAD":"Srisawad Corporation",
     "CBG":"Carabao Group","BTS":"BTS Group Holdings",
 }
-
-@st.cache_data(ttl=3600)
-def load_index_data(period="6mo"):
-    idx = yf.Ticker("^SET50.BK")
-    df = idx.history(period=period)
-    info = idx.info
-    return df, info
 
 @st.cache_data(ttl=3600)
 def load_all_stocks_summary(tickers):
@@ -169,10 +161,11 @@ def make_shareholder_graph_html(nodes, edges):
 <html>
 <head>
 <meta charset="utf-8"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/vis-network.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/dist/dist/vis-network.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.0.2/dist/vis-network.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.0.2/dist/dist/vis-network.min.css"/>
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
+html, body {{ height:100%; }}
 body {{ background:#0f1923; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; overflow:hidden; }}
 #mynetwork {{ width:100%; height:100%; }}
 #tooltip {{
@@ -208,7 +201,7 @@ var options = {{
   physics: {{
     solver: 'barnesHut',
     barnesHut: {{ gravitationalConstant: -3000, centralGravity: 0.3, springLength: 180, springConstant: 0.02, damping: 0.08 }},
-    stabilization: {{ iterations: 150, updateInterval: 20 }}
+    stabilization: {{ iterations: 150, updateInterval: 20, fit: true }}
   }},
   interaction: {{
     hover: true, tooltipDelay: 0, navigationButtons: true, keyboard: true,
@@ -217,6 +210,7 @@ var options = {{
   layout: {{ improvedLayout: true }}
 }};
 var network = new vis.Network(container, {{ nodes, edges }}, options);
+network.fit();
 
 network.on('hoverNode', function(p) {{
   var node = nodes.get(p.node);
@@ -378,48 +372,11 @@ def build_graph_data(symbol, all_shareholder_rows, top_n=10, min_pct=0.0, holder
 
     return nodes, edges
 
-period = st.sidebar.selectbox("Data Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
+stocks_summary = load_all_stocks_summary(SET50_TICKERS)
 
-with st.spinner("Loading SET50 index data..."):
-    try:
-        index_df, index_info = load_index_data(period)
-        stocks_summary = load_all_stocks_summary(SET50_TICKERS)
-    except Exception as e:
-        st.error(f"Failed to load data: {e}")
-        st.stop()
-
-tab1, tab2, tab3 = st.tabs(["Index Overview", "Shareholder Data", "Top Gainers / Losers"])
+tab1, tab2 = st.tabs(["Shareholder Data", "Top Gainers / Losers"])
 
 with tab1:
-    if index_df.empty:
-        st.warning("No index data returned. The market may be closed.")
-        st.stop()
-
-    col1, col2, col3, col4 = st.columns(4)
-    current = index_df["Close"].iloc[-1]
-    if len(index_df) >= 2:
-        prev = index_df["Close"].iloc[-2]
-        change = current - prev
-        change_pct = (change / prev) * 100
-        delta_str = f"{change:.2f} ({change_pct:.2f}%)"
-    else:
-        delta_str = None
-
-    col1.metric("SET50 Index", f"{current:.2f}", delta_str)
-    col2.metric("High (Period)", f"{index_df['High'].max():.2f}")
-    col3.metric("Low (Period)", f"{index_df['Low'].min():.2f}")
-    col4.metric("Volume (Period)", f"{index_df['Volume'].sum():,.0f}")
-
-    st.markdown("### SET50 Index Chart")
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=index_df.index, open=index_df["Open"], high=index_df["High"],
-        low=index_df["Low"], close=index_df["Close"], name="SET50",
-    ))
-    fig.update_layout(height=500, xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig, width='stretch')
-
-with tab2:
     st.header("Major Shareholder Data")
     st.markdown("Source: Stock Exchange of Thailand (SET) — Official Major Shareholders Report")
 
@@ -522,43 +479,16 @@ with tab2:
 
     st.markdown("---")
     st.markdown("#### Shareholder Relationship Graph")
-    st.markdown("Explore ownership relationships — select **All** to see cross-company connections.")
-
-    graph_sel = st.selectbox(
-        "Stock filter:", ["All"] + sorted(SET50_CONSTITUENTS), key="graph_sel"
-    )
-
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1:
-        gtop_n = st.radio("Show top:", [5, 10, 20], horizontal=True, index=1, key="gtop")
-    with col_f2:
-        gmin_pct = st.selectbox("Min ownership:", ["All", ">=1%", ">=5%", ">=10%", ">=25%"], index=0, key="gpct")
-    with col_f3:
-        gtype = st.selectbox(
-            "Holder type:", ["All", "government", "institution", "fund", "company", "individual", "nvdr"],
-            key="gtype"
-        )
-
-    gmin_val = 0.0
-    if gmin_pct == ">=1%":
-        gmin_val = 1.0
-    elif gmin_pct == ">=5%":
-        gmin_val = 5.0
-    elif gmin_pct == ">=10%":
-        gmin_val = 10.0
-    elif gmin_pct == ">=25%":
-        gmin_val = 25.0
+    st.markdown("Showing all SET50 companies with their top shareholders.")
 
     rows_for_graph = []
     for sym in SET50_CONSTITUENTS:
         rows_for_graph.extend(get_shareholders_for_symbol(sym, sh_data))
 
-    graph_sym = "ALL" if graph_sel == "All" else graph_sel
-    gtop_actual = 3 if graph_sym == "ALL" else gtop_n
     nodes_data, edges_data = build_graph_data(
-        graph_sym, rows_for_graph,
-        top_n=gtop_actual, min_pct=gmin_val,
-        holder_types=gtype if gtype != "All" else None,
+        "ALL", rows_for_graph,
+        top_n=40, min_pct=0.0,
+        holder_types=None,
     )
 
     col_graph, col_detail = st.columns([0.7, 0.3])
@@ -638,7 +568,7 @@ with tab2:
                "NVDR (Thai NVDR) indicates shares held through Thai NVDR Company Limited, "
                "which represents foreign investors holding through the non-voting depository receipt program.")
 
-with tab3:
+with tab2:
     st.header("Top Gainers & Losers")
     if not stocks_summary.empty:
         valid = stocks_summary.dropna(subset=["Change%"])
