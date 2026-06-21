@@ -5,3 +5,5 @@ numpy
 plotly
 pyvis
 cloudscraper
+networkx
+matplotlib

@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import json, os, re, random
 from datetime import datetime, timedelta
+from network_analysis import render_analysis
 
 st.set_page_config(page_title="SET50 Dashboard", layout="wide")
 st.title("SET50 Thailand Dashboard")
@@ -376,7 +377,25 @@ def build_graph_data(symbol, all_shareholder_rows, top_n=10, min_pct=0.0, holder
 
 stocks_summary = load_all_stocks_summary(SET50_TICKERS)
 
-tab1, tab2 = st.tabs(["Shareholder Data", "Top Gainers / Losers"])
+@st.cache_data(ttl=3600)
+def load_set50_returns_corr(tickers, period="6mo"):
+    symbols = list(tickers.values())
+    name_by_symbol = {v: k for k, v in tickers.items()}
+    try:
+        prices = yf.download(symbols, period=period, progress=False, auto_adjust=True)["Close"]
+    except Exception:
+        return pd.DataFrame()
+    if prices is None or prices.empty:
+        return pd.DataFrame()
+    prices = prices.dropna(axis=1, how="all")
+    prices = prices.rename(columns=name_by_symbol)
+    returns = prices.pct_change().dropna(how="all")
+    returns = returns.dropna(axis=1, thresh=int(len(returns) * 0.8))
+    if returns.shape[1] < 2:
+        return pd.DataFrame()
+    return returns.corr()
+
+tab1, tab2, tab3 = st.tabs(["Shareholder Data", "Top Gainers / Losers", "Network Analysis"])
 
 with tab1:
     st.header("Major Shareholder Data")
@@ -610,6 +629,20 @@ with tab2:
             st.plotly_chart(fig_pie, width='stretch')
     else:
         st.warning("Stock data unavailable.")
+
+with tab3:
+    period_label = st.selectbox(
+        "Lookback period for returns",
+        ["1mo", "3mo", "6mo", "1y", "2y"],
+        index=2,
+    )
+    with st.spinner("Downloading SET50 price history..."):
+        corr = load_set50_returns_corr(SET50_TICKERS, period=period_label)
+    if corr.empty:
+        st.error("Could not build correlation matrix. Yahoo Finance may be rate-limiting — try Clear Cache & Retry.")
+    else:
+        st.caption(f"Correlation of daily returns over {period_label} ({corr.shape[0]} stocks)")
+        render_analysis(corr)
 
 if st.sidebar.button("Clear Cache & Retry"):
     st.cache_data.clear()
