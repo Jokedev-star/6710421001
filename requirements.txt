@@ -7,3 +7,5 @@ pyvis
 cloudscraper
 networkx
 matplotlib
+scikit-learn
+python-louvain

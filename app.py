@@ -5,6 +5,7 @@ import plotly.express as px
 import json, os, re, random
 from datetime import datetime, timedelta
 from network_analysis import render_analysis
+from graph_analysis import render_graph_analysis
 
 st.set_page_config(page_title="SET50 Dashboard", layout="wide")
 st.title("SET50 Thailand Dashboard")
@@ -395,7 +396,9 @@ def load_set50_returns_corr(tickers, period="6mo"):
         return pd.DataFrame()
     return returns.corr()
 
-tab1, tab2, tab3 = st.tabs(["Shareholder Data", "Top Gainers / Losers", "Network Analysis"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["Shareholder Data", "Top Gainers / Losers", "Network Analysis", "Graph Analysis"]
+)
 
 with tab1:
     st.header("Major Shareholder Data")
@@ -643,6 +646,9 @@ with tab3:
     else:
         st.caption(f"Correlation of daily returns over {period_label} ({corr.shape[0]} stocks)")
         render_analysis(corr)
+
+with tab4:
+    render_graph_analysis("edges_rows.csv")
 
 if st.sidebar.button("Clear Cache & Retry"):
     st.cache_data.clear()

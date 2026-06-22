@@ -5,3 +5,5 @@ CLAUDE_CONTEXT.md
 debug_graph.py
 test_graph.html
 test_render.html
+*.log
+graph_analysis_preview.png
